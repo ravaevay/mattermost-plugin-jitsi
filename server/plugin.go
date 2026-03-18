@@ -209,6 +209,41 @@ func (p *Plugin) updateJwtUserInfo(jwtToken string, user *model.User) (string, e
 	return signClaims(secret, claims)
 }
 
+func (p *Plugin) generateMeetingJwt(meetingID string, user *model.User) (string, error) {
+	config := p.getConfiguration()
+	// Error check is done in configuration.IsValid()
+	jURL, _ := url.Parse(config.GetJitsiURL())
+
+	expiresAt := time.Now().Add(time.Duration(config.JitsiLinkValidTime) * time.Minute)
+
+	claims := Claims{}
+	claims.Issuer = config.JitsiAppID
+	claims.Audience = []string{config.JitsiAppID}
+	claims.ExpiresAt = jwt.NewNumericDate(expiresAt)
+	claims.Subject = jURL.Hostname()
+	claims.Room = meetingID
+
+	mmConfig := p.API.GetConfig()
+	sanitizedUser := user.DeepCopy()
+	if mmConfig.PrivacySettings.ShowFullName == nil || !*mmConfig.PrivacySettings.ShowFullName {
+		sanitizedUser.FirstName = ""
+		sanitizedUser.LastName = ""
+	}
+	if mmConfig.PrivacySettings.ShowEmailAddress == nil || !*mmConfig.PrivacySettings.ShowEmailAddress {
+		sanitizedUser.Email = ""
+	}
+	claims.Context = Context{
+		User: User{
+			Avatar: fmt.Sprintf("%s/api/v4/users/%s/image?_=%d", *mmConfig.ServiceSettings.SiteURL, sanitizedUser.Id, sanitizedUser.LastPictureUpdate),
+			Name:   sanitizedUser.GetDisplayName(model.ShowNicknameFullName),
+			Email:  sanitizedUser.Email,
+			ID:     sanitizedUser.Id,
+		},
+	}
+
+	return signClaims(config.JitsiAppSecret, &claims)
+}
+
 func (p *Plugin) startMeeting(user *model.User, channel *model.Channel, meetingID string, meetingTopic string, _ bool, rootID string) (string, error) {
 	l := p.b.GetServerLocalizer()
 	if meetingID == "" {
@@ -274,20 +309,10 @@ func (p *Plugin) startMeeting(user *model.User, channel *model.Channel, meetingI
 	var jwtToken string
 
 	if JWTMeeting {
-		// Error check is done in configuration.IsValid()
-		jURL, _ := url.Parse(p.getConfiguration().GetJitsiURL())
-
 		meetingLinkValidUntil = time.Now().Add(time.Duration(p.getConfiguration().JitsiLinkValidTime) * time.Minute)
 
-		claims := Claims{}
-		claims.Issuer = p.getConfiguration().JitsiAppID
-		claims.Audience = []string{p.getConfiguration().JitsiAppID}
-		claims.ExpiresAt = jwt.NewNumericDate(meetingLinkValidUntil)
-		claims.Subject = jURL.Hostname()
-		claims.Room = meetingID
-
 		var err2 error
-		jwtToken, err2 = signClaims(p.getConfiguration().JitsiAppSecret, &claims)
+		jwtToken, err2 = p.generateMeetingJwt(meetingID, user)
 		if err2 != nil {
 			return "", err2
 		}
@@ -374,6 +399,97 @@ func (p *Plugin) startMeeting(user *model.User, channel *model.Channel, meetingI
 			"meeting_personal":        meetingPersonal,
 			"meeting_topic":           meetingTopic,
 			"default_meeting_topic":   defaultMeetingTopic,
+		},
+		RootId: rootID,
+	}
+
+	if _, err := p.API.CreatePost(post); err != nil {
+		return "", err
+	}
+
+	return meetingID, nil
+}
+
+func (p *Plugin) startPersistentMeeting(user *model.User, channel *model.Channel, meetingTopic string, rootID string) (string, error) {
+	l := p.b.GetServerLocalizer()
+	meetingID := encodeJitsiMeetingID(meetingTopic)
+	if meetingID != "" {
+		meetingID += "-"
+	}
+	meetingID += randomString(LETTERS, 20)
+
+	defaultMeetingTopic := p.b.LocalizeDefaultMessage(l, &i18n.Message{
+		ID:    "jitsi.start_meeting.default_meeting_topic",
+		Other: "Jitsi Meeting",
+	})
+
+	jitsiURL := strings.TrimSpace(p.getConfiguration().GetJitsiURL())
+	jitsiURL = strings.TrimRight(jitsiURL, "/")
+	meetingURL := jitsiURL + "/" + meetingID
+	meetingLink := meetingURL
+
+	if meetingTopic == "" {
+		meetingURL = meetingURL + "#config.callDisplayName=" + url.PathEscape("\""+defaultMeetingTopic+"\"")
+	} else {
+		meetingURL = meetingURL + "#config.callDisplayName=" + url.PathEscape("\""+meetingTopic+"\"")
+	}
+
+	slackMeetingTopic := meetingTopic
+	if slackMeetingTopic == "" {
+		slackMeetingTopic = defaultMeetingTopic
+	}
+
+	meetingTypeString := p.b.LocalizeWithConfig(l, &i18n.LocalizeConfig{
+		DefaultMessage: &i18n.Message{
+			ID:    "jitsi.start_meeting.persistent_meeting_id",
+			Other: "Persistent Meeting",
+		},
+	})
+
+	slackAttachment := model.SlackAttachment{
+		Fallback: p.b.LocalizeWithConfig(l, &i18n.LocalizeConfig{
+			DefaultMessage: &i18n.Message{
+				ID: "jitsi.start_meeting.fallback_text",
+				Other: `Video Meeting started at [{{.MeetingID}}]({{.MeetingURL}}).
+
+[Join Meeting]({{.MeetingURL}})`,
+			},
+			TemplateData: map[string]string{
+				"MeetingID":  meetingID,
+				"MeetingURL": meetingURL,
+			},
+		}),
+		Title: slackMeetingTopic,
+		Text: p.b.LocalizeWithConfig(l, &i18n.LocalizeConfig{
+			DefaultMessage: &i18n.Message{
+				ID: "jitsi.start_meeting.slack_attachment_text",
+				Other: `{{.MeetingType}}: [{{.MeetingID}}]({{.MeetingURL}})
+
+[Join Meeting]({{.MeetingURL}})`,
+			},
+			TemplateData: map[string]string{
+				"MeetingType": meetingTypeString,
+				"MeetingID":   meetingID,
+				"MeetingURL":  meetingURL,
+			},
+		}),
+	}
+
+	post := &model.Post{
+		UserId:    user.Id,
+		ChannelId: channel.Id,
+		Type:      "custom_jitsi",
+		Props: map[string]interface{}{
+			"attachments":             []*model.SlackAttachment{&slackAttachment},
+			"meeting_id":              meetingID,
+			"meeting_link":            meetingLink,
+			"jwt_meeting":             false,
+			"meeting_jwt":             "",
+			"jwt_meeting_valid_until": 0,
+			"meeting_personal":        false,
+			"meeting_topic":           meetingTopic,
+			"default_meeting_topic":   defaultMeetingTopic,
+			"meeting_persistent":      true,
 		},
 		RootId: rootID,
 	}
