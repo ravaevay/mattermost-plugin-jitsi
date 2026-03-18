@@ -21,6 +21,7 @@ export type Props = {
         enrichMeetingJwt: (jwt: string) => Promise<ActionResult>,
         openJitsiMeeting: (post: Post | null, jwt: string | null) => ActionResult,
         setUserStatus: (userId: string, status: string) => Promise<ActionResult>,
+        generateMeetingToken: (meetingId: string) => Promise<ActionResult>,
     }
 }
 
@@ -37,7 +38,7 @@ export class PostTypeJitsi extends React.PureComponent<Props, State> {
 
     componentDidMount() {
         const {post} = this.props;
-        if (post && post.props.jwt_meeting) {
+        if (post && post.props.jwt_meeting && !post.props.meeting_persistent) {
             this.props.actions.enrichMeetingJwt(post.props.meeting_jwt).then((response: any) => {
                 if (response.data) {
                     this.setState({meetingJwt: response.data.jwt});
@@ -46,27 +47,58 @@ export class PostTypeJitsi extends React.PureComponent<Props, State> {
         }
     }
 
-    openJitsiMeeting = (e: React.MouseEvent) => {
-        if (this.props.meetingEmbedded) {
+    openJitsiMeeting = async (e: React.MouseEvent) => {
+        if (!this.props.post) {
+            return;
+        }
+
+        const props = this.props.post.props;
+
+        if (props.meeting_persistent) {
             e.preventDefault();
-            if (this.props.post) {
-                // could be improved by using an enum in the future for the status
-                this.props.actions.setUserStatus(this.props.currentUser.id, Constants.DND);
-                this.props.actions.openJitsiMeeting(this.props.post, this.state.meetingJwt || this.props.post.props.meeting_jwt || null);
+            let jwt: string | null = null;
+            try {
+                const response: any = await this.props.actions.generateMeetingToken(props.meeting_id);
+                if (response.data) {
+                    jwt = response.data.jwt;
+                }
+            } catch {
+                // fallback: open without JWT
             }
-        } else if (this.state.meetingJwt) {
-            e.preventDefault();
-            if (this.props.post) {
-                const props = this.props.post.props;
-                let meetingLink = props.meeting_link + '?jwt=' + (this.state.meetingJwt);
+
+            if (this.props.meetingEmbedded) {
+                this.props.actions.setUserStatus(this.props.currentUser.id, Constants.DND);
+                this.props.actions.openJitsiMeeting(this.props.post, jwt);
+            } else {
+                let meetingLink = props.meeting_link;
+                if (jwt) {
+                    meetingLink += '?jwt=' + jwt;
+                }
                 meetingLink += `#config.callDisplayName=${encodeURIComponent(`"${props.meeting_topic || props.default_meeting_topic}"`)}`;
                 window.open(meetingLink, '_blank');
             }
+            return;
+        }
+
+        if (this.props.meetingEmbedded) {
+            e.preventDefault();
+            // could be improved by using an enum in the future for the status
+            this.props.actions.setUserStatus(this.props.currentUser.id, Constants.DND);
+            this.props.actions.openJitsiMeeting(this.props.post, this.state.meetingJwt || props.meeting_jwt || null);
+        } else if (this.state.meetingJwt) {
+            e.preventDefault();
+            let meetingLink = props.meeting_link + '?jwt=' + (this.state.meetingJwt);
+            meetingLink += `#config.callDisplayName=${encodeURIComponent(`"${props.meeting_topic || props.default_meeting_topic}"`)}`;
+            window.open(meetingLink, '_blank');
         }
     };
 
     renderUntilDate = (post: Post, style: any): React.ReactNode => {
         const props = post.props;
+
+        if (props.meeting_persistent) {
+            return null;
+        }
 
         if (props.jwt_meeting) {
             const date = new Date(props.jwt_meeting_valid_until * 1000);
@@ -97,7 +129,7 @@ export class PostTypeJitsi extends React.PureComponent<Props, State> {
         const props = post.props;
 
         let meetingLink = props.meeting_link;
-        if (props.jwt_meeting) {
+        if (props.jwt_meeting && !props.meeting_persistent) {
             meetingLink += '?jwt=' + encodeURIComponent(props.meeting_jwt);
         }
 
@@ -118,7 +150,14 @@ export class PostTypeJitsi extends React.PureComponent<Props, State> {
                 defaultMessage='Meeting ID: '
             />
         );
-        if (props.meeting_personal) {
+        if (props.meeting_persistent) {
+            subtitle = (
+                <FormattedMessage
+                    id='jitsi.persistent-meeting-id'
+                    defaultMessage='Persistent Meeting: '
+                />
+            );
+        } else if (props.meeting_personal) {
             subtitle = (
                 <FormattedMessage
                     id='jitsi.personal-meeting-id'

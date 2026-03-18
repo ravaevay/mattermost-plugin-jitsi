@@ -55,6 +55,17 @@ export function startMeeting(channelId: string, personal: boolean = false, topic
     };
 }
 
+export function generateMeetingToken(meetingId: string): ActionFunc {
+    return async (): Promise<ActionResult> => {
+        try {
+            const data = await Client.generateMeetingToken(meetingId);
+            return {data};
+        } catch (error) {
+            return {error};
+        }
+    };
+}
+
 export function enrichMeetingJwt(meetingJwt: string): ActionFunc {
     return async (): Promise<ActionResult> => {
         try {

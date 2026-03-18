@@ -16,6 +16,7 @@ const jitsiCommand = "jitsi"
 
 const jitsiSettingsSeeCommand = "see"
 const jitsiStartCommand = "start"
+const jitsiPersistentCommand = "persistent"
 
 const valueTrue = "true"
 const valueFalse = "false"
@@ -56,6 +57,10 @@ func getAutocompleteData() *model.AutocompleteData {
 	start := model.NewAutocompleteData(jitsiStartCommand, "[topic]", "Start a new meeting in the current channel")
 	start.AddTextArgument("(optional) The topic of the new meeting", "[topic]", "")
 	jitsi.AddCommand(start)
+
+	persistent := model.NewAutocompleteData(jitsiPersistentCommand, "[topic]", "Start a persistent meeting with a link that never expires")
+	persistent.AddTextArgument("(optional) The topic of the persistent meeting", "[topic]", "")
+	jitsi.AddCommand(persistent)
 
 	help := model.NewAutocompleteData("help", "", "Get slash command help")
 	jitsi.AddCommand(help)
@@ -131,6 +136,9 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 	case "settings":
 		return p.executeSettingsCommand(c, args, parameters)
 
+	case jitsiPersistentCommand:
+		return p.executePersistentMeetingCommand(c, args)
+
 	case jitsiStartCommand:
 		fallthrough
 	default:
@@ -172,6 +180,29 @@ func (p *Plugin) executeStartMeetingCommand(_ *plugin.Context, args *model.Comma
 	return &model.CommandResponse{}, nil
 }
 
+func (p *Plugin) executePersistentMeetingCommand(_ *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
+	input := strings.TrimSpace(strings.TrimPrefix(args.Command, "/"+jitsiCommand))
+	input = strings.TrimSpace(strings.TrimPrefix(input, jitsiPersistentCommand))
+
+	user, appErr := p.API.GetUser(args.UserId)
+	if appErr != nil {
+		return startMeetingError(args.ChannelId, fmt.Sprintf("getUser() threw error: %s", appErr))
+	}
+
+	channel, appErr := p.API.GetChannel(args.ChannelId)
+	if appErr != nil {
+		return startMeetingError(args.ChannelId, fmt.Sprintf("getChannel() threw error: %s", appErr))
+	}
+
+	if _, err := p.startPersistentMeeting(user, channel, input, args.RootId); err != nil {
+		return startMeetingError(args.ChannelId, fmt.Sprintf("startPersistentMeeting() threw error: %s", err))
+	}
+
+	p.trackMeeting(args)
+
+	return &model.CommandResponse{}, nil
+}
+
 func (p *Plugin) executeHelpCommand(_ *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
 	l := p.b.GetUserLocalizer(args.UserId)
 	helpTitle := p.b.LocalizeWithConfig(l, &i18n.LocalizeConfig{
@@ -186,6 +217,7 @@ func (p *Plugin) executeHelpCommand(_ *plugin.Context, args *model.CommandArgs) 
 			ID: "jitsi.command.help.text",
 			Other: `* |/jitsi| - Create a new meeting
 * |/jitsi start [topic]| - Create a new meeting with specified topic
+* |/jitsi persistent [topic]| - Create a persistent meeting with a link that never expires
 * |/jitsi help| - Show this help text
 * |/jitsi settings see| - View your current user settings for the Jitsi plugin
 * |/jitsi settings [setting] [value]| - Update your user settings (see below for options)

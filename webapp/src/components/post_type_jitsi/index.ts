@@ -8,7 +8,7 @@ import {Post} from 'mattermost-redux/types/posts';
 
 import {GlobalState, plugin} from 'types';
 import {displayUsernameForUser} from 'utils/user_utils';
-import {enrichMeetingJwt, openJitsiMeeting, setUserStatus} from 'actions';
+import {enrichMeetingJwt, openJitsiMeeting, setUserStatus, generateMeetingToken} from 'actions';
 import manifest from 'manifest';
 import {PostTypeJitsi} from './post_type_jitsi';
 
@@ -35,6 +35,7 @@ type Actions = {
     enrichMeetingJwt: (jwt: string) => Promise<ActionResult>,
     openJitsiMeeting: (post: Post | null, jwt: string | null) => ActionResult,
     setUserStatus: (userId: string, status: string) => Promise<ActionResult>,
+    generateMeetingToken: (meetingId: string) => Promise<ActionResult>,
 }
 
 function mapDispatchToProps(dispatch: Dispatch<GenericAction>) {
@@ -42,7 +43,8 @@ function mapDispatchToProps(dispatch: Dispatch<GenericAction>) {
         actions: bindActionCreators<ActionCreatorsMapObject<ActionFunc>, Actions>({
             enrichMeetingJwt,
             openJitsiMeeting,
-            setUserStatus
+            setUserStatus,
+            generateMeetingToken
         }, dispatch)
     };
 }

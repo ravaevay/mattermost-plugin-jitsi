@@ -16,6 +16,10 @@ export default class Client {
         return this.doPost(`${this.url}/api/v1/meetings`, {channel_id: channelId, personal, topic, meeting_id: meetingId});
     };
 
+    generateMeetingToken = async (meetingId: string) => {
+        return this.doPost(`${this.url}/api/v1/meetings/token`, {meeting_id: meetingId});
+    };
+
     enrichMeetingJwt = async (meetingJwt: string) => {
         return this.doPost(`${this.url}/api/v1/meetings/enrich`, {jwt: meetingJwt});
     };

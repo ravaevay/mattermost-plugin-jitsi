@@ -41,6 +41,8 @@ func (p *Plugin) ServeHTTP(_ *plugin.Context, w http.ResponseWriter, r *http.Req
 	switch path := r.URL.Path; path {
 	case "/api/v1/meetings/enrich":
 		p.handleEnrichMeetingJwt(w, r)
+	case "/api/v1/meetings/token":
+		p.handleGenerateMeetingToken(w, r)
 	case "/api/v1/meetings":
 		p.handleStartMeeting(w, r)
 	case "/api/v1/config":
@@ -248,6 +250,65 @@ func (p *Plugin) handleStartMeeting(w http.ResponseWriter, r *http.Request) {
 	_, err = w.Write(b)
 	if err != nil {
 		mlog.Warn("Unable to write response body", mlog.String("handler", "handleStartMeeting"), mlog.Err(err))
+	}
+}
+
+type GenerateMeetingTokenRequest struct {
+	MeetingID string `json:"meeting_id"`
+}
+
+func (p *Plugin) handleGenerateMeetingToken(w http.ResponseWriter, r *http.Request) {
+	if err := p.getConfiguration().IsValid(); err != nil {
+		mlog.Error("Invalid plugin configuration", mlog.Err(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		http.Error(w, "Not authorized", http.StatusUnauthorized)
+		return
+	}
+
+	if !p.getConfiguration().JitsiJWT {
+		http.Error(w, "JWT not enabled", http.StatusBadRequest)
+		return
+	}
+
+	var req GenerateMeetingTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		mlog.Debug("Unable to read request body", mlog.Err(err))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.MeetingID == "" {
+		http.Error(w, "meeting_id is required", http.StatusBadRequest)
+		return
+	}
+
+	user, appErr := p.API.GetUser(userID)
+	if appErr != nil {
+		http.Error(w, appErr.Error(), appErr.StatusCode)
+		return
+	}
+
+	jwtToken, err := p.generateMeetingJwt(req.MeetingID, user)
+	if err != nil {
+		mlog.Error("Error generating meeting JWT", mlog.Err(err))
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	b, err := json.Marshal(map[string]string{"jwt": jwtToken})
+	if err != nil {
+		mlog.Error("Error marshaling the JWT json", mlog.Err(err))
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if _, err = w.Write(b); err != nil {
+		mlog.Warn("Unable to write response body", mlog.String("handler", "handleGenerateMeetingToken"), mlog.Err(err))
 	}
 }
 
