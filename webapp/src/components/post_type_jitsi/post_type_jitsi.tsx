@@ -61,9 +61,11 @@ export class PostTypeJitsi extends React.PureComponent<Props, State> {
                 const response: any = await this.props.actions.generateMeetingToken(props.meeting_id);
                 if (response.data) {
                     jwt = response.data.jwt;
+                } else if (response.error) {
+                    console.error('Failed to generate meeting token:', response.error);
                 }
-            } catch {
-                // fallback: open without JWT
+            } catch (err) {
+                console.error('Error generating meeting token:', err);
             }
 
             if (this.props.meetingEmbedded) {
