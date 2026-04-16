@@ -35,7 +35,7 @@ type Actions = {
     enrichMeetingJwt: (jwt: string) => Promise<ActionResult>,
     openJitsiMeeting: (post: Post | null, jwt: string | null) => ActionResult,
     setUserStatus: (userId: string, status: string) => Promise<ActionResult>,
-    generateMeetingToken: (meetingId: string) => Promise<ActionResult>,
+    generateMeetingToken: (meetingId: string, channelId: string) => Promise<ActionResult>,
 }
 
 function mapDispatchToProps(dispatch: Dispatch<GenericAction>) {

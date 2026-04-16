@@ -255,6 +255,7 @@ func (p *Plugin) handleStartMeeting(w http.ResponseWriter, r *http.Request) {
 
 type GenerateMeetingTokenRequest struct {
 	MeetingID string `json:"meeting_id"`
+	ChannelID string `json:"channel_id"`
 }
 
 func (p *Plugin) handleGenerateMeetingToken(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +294,7 @@ func (p *Plugin) handleGenerateMeetingToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	jwtToken, err := p.generateMeetingJwt(req.MeetingID, user)
+	jwtToken, err := p.generateMeetingJwt(req.MeetingID, user, req.ChannelID)
 	if err != nil {
 		mlog.Error("Error generating meeting JWT", mlog.Err(err))
 		http.Error(w, "Internal error", http.StatusInternalServerError)

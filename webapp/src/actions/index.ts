@@ -55,10 +55,10 @@ export function startMeeting(channelId: string, personal: boolean = false, topic
     };
 }
 
-export function generateMeetingToken(meetingId: string): ActionFunc {
+export function generateMeetingToken(meetingId: string, channelId: string): ActionFunc {
     return async (): Promise<ActionResult> => {
         try {
-            const data = await Client.generateMeetingToken(meetingId);
+            const data = await Client.generateMeetingToken(meetingId, channelId);
             return {data};
         } catch (error) {
             return {error};

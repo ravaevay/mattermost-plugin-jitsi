@@ -106,8 +106,9 @@ type User struct {
 }
 
 type Context struct {
-	User  User   `json:"user"`
-	Group string `json:"group"`
+	User      User   `json:"user"`
+	Group     string `json:"group"`
+	ChannelID string `json:"channel_id,omitempty"`
 }
 
 type EnrichMeetingJwtRequest struct {
@@ -201,7 +202,8 @@ func (p *Plugin) updateJwtUserInfo(jwtToken string, user *model.User) (string, e
 			Email:  sanitizedUser.Email,
 			ID:     sanitizedUser.Id,
 		},
-		Group: claims.Context.Group,
+		Group:     claims.Context.Group,
+		ChannelID: claims.Context.ChannelID,
 	}
 
 	claims.Context = newContext
@@ -209,7 +211,7 @@ func (p *Plugin) updateJwtUserInfo(jwtToken string, user *model.User) (string, e
 	return signClaims(secret, claims)
 }
 
-func (p *Plugin) generateMeetingJwt(meetingID string, user *model.User) (string, error) {
+func (p *Plugin) generateMeetingJwt(meetingID string, user *model.User, channelID string) (string, error) {
 	config := p.getConfiguration()
 	// Error check is done in configuration.IsValid()
 	jURL, _ := url.Parse(config.GetJitsiURL())
@@ -239,6 +241,7 @@ func (p *Plugin) generateMeetingJwt(meetingID string, user *model.User) (string,
 			Email:  sanitizedUser.Email,
 			ID:     sanitizedUser.Id,
 		},
+		ChannelID: channelID,
 	}
 
 	return signClaims(config.JitsiAppSecret, &claims)
@@ -312,7 +315,7 @@ func (p *Plugin) startMeeting(user *model.User, channel *model.Channel, meetingI
 		meetingLinkValidUntil = time.Now().Add(time.Duration(p.getConfiguration().JitsiLinkValidTime) * time.Minute)
 
 		var err2 error
-		jwtToken, err2 = p.generateMeetingJwt(meetingID, user)
+		jwtToken, err2 = p.generateMeetingJwt(meetingID, user, channel.Id)
 		if err2 != nil {
 			return "", err2
 		}

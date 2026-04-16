@@ -21,7 +21,7 @@ export type Props = {
         enrichMeetingJwt: (jwt: string) => Promise<ActionResult>,
         openJitsiMeeting: (post: Post | null, jwt: string | null) => ActionResult,
         setUserStatus: (userId: string, status: string) => Promise<ActionResult>,
-        generateMeetingToken: (meetingId: string) => Promise<ActionResult>,
+        generateMeetingToken: (meetingId: string, channelId: string) => Promise<ActionResult>,
     }
 }
 
@@ -58,7 +58,7 @@ export class PostTypeJitsi extends React.PureComponent<Props, State> {
             e.preventDefault();
             let jwt: string | null = null;
             try {
-                const response: any = await this.props.actions.generateMeetingToken(props.meeting_id);
+                const response: any = await this.props.actions.generateMeetingToken(props.meeting_id, this.props.post!.channel_id);
                 if (response.data) {
                     jwt = response.data.jwt;
                 } else if (response.error) {
