@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Mattermost plugin that integrates Jitsi Meet video conferencing. Has two components: a Go server plugin (`server/`) and a React/TypeScript webapp (`webapp/`). The plugin provides a `/jitsi` slash command, channel header button, and embedded Jitsi meeting support within Mattermost.
+Mattermost plugin that integrates Jitsi Meet video conferencing. Has two components: a Go server plugin (`server/`) and a React/TypeScript webapp (`webapp/`). The plugin provides `/jitsi` slash commands (start, persistent, settings, help), a channel header button, and embedded Jitsi meeting support within Mattermost.
 
 ## Build & Development Commands
 
@@ -37,9 +37,11 @@ cd webapp && npm run fix           # auto-fix lint issues
 cd webapp && npm run check-types   # TypeScript type checking
 ```
 
-### Debug builds
+### Build notes
 
-Set `MM_DEBUG=1` to build with debug symbols (Go: `-gcflags "all=-N -l"`, webapp: webpack mode=none).
+- Set `MM_DEBUG=1` to build with debug symbols (Go: `-gcflags "all=-N -l"`, webapp: webpack mode=none).
+- Node 18 requires `NODE_OPTIONS=--openssl-legacy-provider` for webpack 4 builds.
+- `make clean` removes `build/bin/`, `node_modules/`, and dist. After clean, rebuild `build/bin/manifest` with `go build -o build/bin/manifest build/manifest/main.go` before running `make dist`, or run `npm install` in `webapp/` before building.
 
 ## Architecture
 
@@ -47,8 +49,8 @@ Set `MM_DEBUG=1` to build with debug symbols (Go: `-gcflags "all=-N -l"`, webapp
 
 - **main.go** — Entry point; calls `plugin.ClientMain()`
 - **plugin.go** — Core `Plugin` struct implementing Mattermost plugin hooks (`OnActivate`, `OnConfigurationChange`). Initializes bot user, telemetry, and i18n bundle
-- **api.go** — HTTP API endpoints served by the plugin
-- **command.go** — `/jitsi` slash command handler with meeting creation logic
+- **api.go** — HTTP API endpoints: `/api/v1/meetings` (start), `/api/v1/meetings/enrich` (enrich JWT), `/api/v1/meetings/token` (generate fresh JWT for persistent meetings), `/api/v1/config` (user config)
+- **command.go** — `/jitsi` slash command handler: `start`, `persistent`, `settings`, `help`
 - **configuration.go** — Plugin settings management with `OnConfigurationChange` hook
 - **randomNameGenerator.go** — Generates human-readable random meeting names
 
@@ -74,9 +76,27 @@ Uses React 16, Redux, react-intl for i18n, Enzyme for testing.
 
 Key settings: JitsiURL (server address), JitsiEmbedded (in-app meetings), JitsiNamingScheme (random/UUID/context/ask), JWT auth (JitsiJWT, JitsiAppID, JitsiAppSecret).
 
+### Meeting Types
+
+- **Regular meetings** (`/jitsi start`): JWT generated at creation time with fixed expiration (JitsiLinkValidTime). Link expires after the configured time.
+- **Persistent meetings** (`/jitsi persistent`): No JWT at creation time. Each "Join Meeting" click calls `/api/v1/meetings/token` to generate a fresh JWT, so the link never expires. Posts have `meeting_persistent: true` in props.
+
+### JWT Structure
+
+When JWT auth is enabled, tokens include a `context` object with `user` info, `group`, and `channel_id` (the Mattermost channel where the meeting was created). The `channel_id` is used by Jibri to determine the source channel for recordings. Key functions:
+- `generateMeetingJwt(meetingID, user, channelID)` — creates a new JWT with user context
+- `updateJwtUserInfo(jwtToken, user)` — enriches an existing JWT with the calling user's info (preserves `channel_id` and `group`)
+- `signClaims` / `verifyJwt` — low-level JWT signing and verification
+
 ## Tooling
 
 - **Go:** 1.23+, golangci-lint v1.61.0 (see `.golangci.yml` for enabled linters)
 - **Node/Webapp:** TypeScript 3.9, webpack 4, ESLint (see `webapp/.eslintrc.json`), Jest 26
 - **CI:** GitHub Actions using shared Mattermost community plugin workflows
 - **Docker:** `./docker-make` available for containerized builds
+
+## Known Build Issues
+
+- `go vet` and `go build` report `undefined: manifest` — this is expected, `manifest` is generated at build time by `build/bin/manifest apply`
+- `tsc --noEmit` reports `Cannot find module 'manifest'` — same reason, generated at build time
+- These errors do not affect `make dist` builds
